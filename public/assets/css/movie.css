@@ -1,0 +1,367 @@
+/* public/assets/css/movie.css */
+
+/* Movie Card Styles */
+.movie-card-container {
+    margin-bottom: 30px;
+}
+
+.movie-card {
+    background-color: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s ease;
+    height: 100%;
+}
+
+.movie-card:hover {
+    transform: translateY(-10px);
+    box-shadow: 0 12px 16px rgba(0, 0, 0, 0.2);
+}
+
+.movie-card a {
+    text-decoration: none;
+    color: inherit;
+}
+
+.movie-card-image {
+    position: relative;
+    height: 250px;
+    overflow: hidden;
+}
+
+.movie-card-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.5s ease;
+}
+
+.movie-card:hover .movie-card-image img {
+    transform: scale(1.05);
+}
+
+.movie-card-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(to bottom,
+            rgba(0, 0, 0, 0.1) 0%,
+            rgba(0, 0, 0, 0.8) 100%);
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 15px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    color: white;
+}
+
+.movie-card:hover .movie-card-overlay {
+    opacity: 1;
+}
+
+.movie-card-overlay .price {
+    background-color: var(--primary-color);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: bold;
+    position: absolute;
+    top: 10px;
+    right: 10px;
+}
+
+.movie-card-overlay .duration {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+}
+
+.movie-card-overlay .views {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+}
+
+.movie-card-content {
+    padding: 15px;
+}
+
+.movie-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    height: 50px;
+}
+
+.movie-info {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.9rem;
+    color: #6c757d;
+}
+
+/* Movie Detail Page */
+.movie-detail {
+    padding: 30px 0;
+}
+
+.movie-poster {
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+}
+
+.movie-poster img {
+    width: 100%;
+    height: auto;
+}
+
+.movie-info-detail {
+    padding: 20px;
+}
+
+.movie-info-detail h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 15px;
+}
+
+.movie-meta-detail {
+    display: flex;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+.movie-meta-detail span {
+    margin-right: 20px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+}
+
+.movie-meta-detail i {
+    margin-right: 5px;
+    color: var(--primary-color);
+}
+
+.movie-price {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--primary-color);
+    margin-bottom: 20px;
+}
+
+.movie-desc {
+    margin-bottom: 30px;
+}
+
+.movie-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.movie-actions .btn {
+    padding: 10px 20px;
+}
+
+/* Movie Payment Page */
+.payment-container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 30px;
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.payment-header {
+    margin-bottom: 30px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #eee;
+}
+
+.payment-movie {
+    display: flex;
+    align-items: center;
+    margin-bottom: 30px;
+}
+
+.payment-movie-image {
+    width: 100px;
+    height: 150px;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-right: 20px;
+}
+
+.payment-movie-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.payment-movie-info h3 {
+    font-size: 1.25rem;
+    margin-bottom: 10px;
+}
+
+.payment-methods {
+    margin-bottom: 30px;
+}
+
+.payment-method-item {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 15px;
+    margin-bottom: 15px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.payment-method-item:hover,
+.payment-method-item.active {
+    border-color: var(--primary-color);
+    background-color: rgba(63, 81, 181, 0.05);
+}
+
+.payment-method-item .form-check-label {
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.payment-method-item .payment-icon {
+    font-size: 1.5rem;
+    margin-right: 10px;
+    color: var(--primary-color);
+}
+
+.payment-summary {
+    background-color: #f8f9fa;
+    border-radius: 4px;
+    padding: 20px;
+}
+
+.payment-summary-item {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 15px;
+}
+
+.payment-summary-total {
+    font-weight: 700;
+    font-size: 1.25rem;
+    padding-top: 15px;
+    margin-top: 15px;
+    border-top: 1px solid #ddd;
+}
+
+/* Movie List Page */
+.movie-filters {
+    background-color: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    margin-bottom: 30px;
+}
+
+.filter-section {
+    margin-bottom: 20px;
+}
+
+.filter-section h4 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee;
+}
+
+.filter-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.filter-list li {
+    margin-bottom: 10px;
+}
+
+.filter-list a {
+    color: #495057;
+    transition: all 0.3s ease;
+}
+
+.filter-list a:hover,
+.filter-list a.active {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.sort-dropdown {
+    min-width: 200px;
+}
+
+/* Responsive Styles */
+@media (max-width: 992px) {
+    .movie-info-detail h1 {
+        font-size: 2rem;
+    }
+}
+
+@media (max-width: 768px) {
+    .movie-card-image {
+        height: 200px;
+    }
+
+    .movie-detail {
+        padding: 15px 0;
+    }
+
+    .movie-info-detail {
+        padding: 15px 0;
+    }
+
+    .movie-info-detail h1 {
+        font-size: 1.75rem;
+        margin-top: 15px;
+    }
+
+    .payment-movie {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .payment-movie-image {
+        margin-bottom: 15px;
+        margin-right: 0;
+    }
+}
+
+@media (max-width: 576px) {
+    .movie-card-image {
+        height: 180px;
+    }
+
+    .movie-title {
+        font-size: 1rem;
+    }
+
+    .movie-actions {
+        flex-direction: column;
+    }
+
+    .movie-actions .btn {
+        width: 100%;
+    }
+}
