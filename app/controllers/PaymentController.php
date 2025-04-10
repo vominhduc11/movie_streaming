@@ -145,26 +145,46 @@ class PaymentController extends Controller
             return;
         }
 
+        // Tạo mã giao dịch
+        $orderId = 'MOVIE' . time() . rand(1000, 9999);
+        $amount = $movie['price'];
+        $orderInfo = "Thanh toán cho phim: " . $movie['title'];
+
         // Tạo thanh toán với trạng thái 'pending'
         $paymentId = $this->paymentModel->create([
             'user_id' => $userId,
             'movie_id' => $movieId,
-            'amount' => $movie['price'],
+            'amount' => $amount,
             'status' => 'pending',
             'payment_method' => 'momo',
-            'transaction_id' => 'MOMO_' . time() . rand(1000, 9999)
+            'transaction_id' => $orderId
         ]);
 
-        // TODO: Tích hợp API MoMo thực tế
-        // Trong demo này, chúng ta giả lập thành công
+        // Khởi tạo MomoPaymentService
+        $momoService = new \App\Services\MomoPaymentService();
 
-        // Trả về URL để chuyển hướng đến trang thanh toán MoMo
-        $this->json([
-            'status' => 'success',
-            'message' => 'Đang chuyển hướng đến trang thanh toán MoMo',
-            'payment_id' => $paymentId,
-            'redirect_url' => APP_URL . '/payments/momo-redirect/' . $paymentId
-        ]);
+        // Tạo thanh toán MoMo
+        $extraData = "paymentId=$paymentId";
+        $result = $momoService->createPayment($orderId, $amount, $orderInfo, $extraData);
+
+        if (isset($result['payUrl'])) {
+            // Trả về URL để chuyển hướng đến trang thanh toán MoMo
+            $this->json([
+                'status' => 'success',
+                'message' => 'Đang chuyển hướng đến trang thanh toán MoMo',
+                'payment_id' => $paymentId,
+                'redirect_url' => $result['payUrl']
+            ]);
+        } else {
+            // Cập nhật trạng thái thanh toán thành 'failed'
+            $this->paymentModel->updateStatus($paymentId, 'failed');
+
+            $this->json([
+                'status' => 'error',
+                'message' => 'Không thể tạo thanh toán MoMo. Vui lòng thử lại sau.',
+                'error_details' => isset($result['message']) ? $result['message'] : 'Unknown error'
+            ]);
+        }
     }
 
     // Xử lý thanh toán qua thẻ
