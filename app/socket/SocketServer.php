@@ -1,213 +1,481 @@
 <?php
-// app/models/Room.php
-namespace App\Models;
+// app/socket/SocketServer.php
+namespace App\Socket;
 
-use App\Core\Database;
+use Ratchet\MessageComponentInterface;
+use Ratchet\ConnectionInterface;
+use App\Models\Room;
+use App\Models\Chat;
+use App\Models\User;
 
-class Room
+class SocketServer implements MessageComponentInterface
 {
-    private $db;
-    private $table = 'rooms';
+    protected $clients;
+    protected $rooms;
+    protected $userRooms;
+    protected $adminRooms;
+    protected $roomModel;
+    protected $chatModel;
+    protected $userModel;
 
     public function __construct()
     {
-        $this->db = new Database();
+        $this->clients = new \SplObjectStorage;
+        $this->rooms = [];
+        $this->userRooms = [];
+        $this->adminRooms = [];
+        $this->roomModel = new Room();
+        $this->chatModel = new Chat();
+        $this->userModel = new User();
+
+        echo "Socket Server khởi động...\n";
     }
 
-    // Lấy tất cả phòng
-    public function getAll($limit = null, $offset = null)
+    public function onOpen(ConnectionInterface $conn)
     {
-        $sql = "SELECT r.*, m.title as movie_title, a.username as admin_username 
-                FROM {$this->table} r
-                JOIN movies m ON r.movie_id = m.id
-                JOIN admins a ON r.admin_id = a.id
-                ORDER BY r.created_at DESC";
+        // Lưu kết nối mới
+        $this->clients->attach($conn);
 
-        if ($limit !== null) {
-            $sql .= " LIMIT {$limit}";
+        echo "Kết nối mới! ({$conn->resourceId})\n";
+    }
 
-            if ($offset !== null) {
-                $sql .= " OFFSET {$offset}";
+    public function onMessage(ConnectionInterface $from, $msg)
+    {
+        $data = json_decode($msg, true);
+
+        if (!isset($data['action'])) {
+            return;
+        }
+
+        echo "Nhận tin nhắn: {$data['action']} từ ({$from->resourceId})\n";
+
+        switch ($data['action']) {
+            case 'join_room':
+                $this->handleJoinRoom($from, $data);
+                break;
+
+            case 'leave_room':
+                $this->handleLeaveRoom($from, $data);
+                break;
+
+            case 'chat_message':
+                $this->handleChatMessage($from, $data);
+                break;
+
+            case 'play_video':
+                $this->handlePlayVideo($from, $data);
+                break;
+
+            case 'pause_video':
+                $this->handlePauseVideo($from, $data);
+                break;
+
+            case 'video_seek':
+                $this->handleVideoSeek($from, $data);
+                break;
+
+            case 'update_video_time':
+                $this->handleUpdateVideoTime($from, $data);
+                break;
+        }
+    }
+
+    public function onClose(ConnectionInterface $conn)
+    {
+        // Xử lý người dùng rời phòng khi đóng kết nối
+        if (isset($this->userRooms[$conn->resourceId])) {
+            $roomId = $this->userRooms[$conn->resourceId]['room_id'];
+            $userId = $this->userRooms[$conn->resourceId]['user_id'];
+
+            // Cập nhật trạng thái rời phòng trong database
+            $this->roomModel->removeUser($roomId, $userId);
+
+            // Thông báo cho những người còn lại trong phòng
+            $this->broadcastUserLeft($roomId, $userId);
+
+            // Xóa thông tin người dùng
+            unset($this->userRooms[$conn->resourceId]);
+
+            // Xóa khỏi danh sách phòng
+            if (isset($this->rooms[$roomId])) {
+                foreach ($this->rooms[$roomId] as $key => $clientId) {
+                    if ($clientId === $conn->resourceId) {
+                        unset($this->rooms[$roomId][$key]);
+                        break;
+                    }
+                }
             }
         }
 
-        return $this->db->fetchAll($sql);
+        // Xử lý admin rời phòng
+        if (isset($this->adminRooms[$conn->resourceId])) {
+            $roomId = $this->adminRooms[$conn->resourceId]['room_id'];
+
+            // Thông báo cho người dùng trong phòng
+            $this->broadcastAdminLeft($roomId);
+
+            // Xóa thông tin admin
+            unset($this->adminRooms[$conn->resourceId]);
+        }
+
+        // Xóa kết nối
+        $this->clients->detach($conn);
+
+        echo "Kết nối {$conn->resourceId} đã đóng\n";
     }
 
-    // Lấy tất cả phòng đang mở
-    public function getAllOpen($limit = null, $offset = null)
+    public function onError(ConnectionInterface $conn, \Exception $e)
     {
-        $sql = "SELECT r.*, m.title as movie_title, a.username as admin_username 
-                FROM {$this->table} r
-                JOIN movies m ON r.movie_id = m.id
-                JOIN admins a ON r.admin_id = a.id
-                WHERE r.status = 'open'
-                ORDER BY r.created_at DESC";
+        echo "Lỗi: {$e->getMessage()}\n";
 
-        if ($limit !== null) {
-            $sql .= " LIMIT {$limit}";
+        $conn->close();
+    }
 
-            if ($offset !== null) {
-                $sql .= " OFFSET {$offset}";
+    protected function handleJoinRoom(ConnectionInterface $conn, $data)
+    {
+        if (!isset($data['room_id']) || !isset($data['token'])) {
+            return;
+        }
+
+        $roomId = $data['room_id'];
+        $token = $data['token'];
+
+        // Giải mã token
+        $tokenData = json_decode(base64_decode($token), true);
+
+        // Kiểm tra token hợp lệ
+        if (!$tokenData) {
+            $conn->send(json_encode([
+                'action' => 'error',
+                'message' => 'Token không hợp lệ'
+            ]));
+            return;
+        }
+
+        // Lấy thông tin phòng
+        $room = $this->roomModel->getById($roomId);
+
+        if (!$room) {
+            $conn->send(json_encode([
+                'action' => 'error',
+                'message' => 'Phòng không tồn tại'
+            ]));
+            return;
+        }
+
+        // Kiểm tra phòng có đang mở không
+        if ($room['status'] !== 'open') {
+            $conn->send(json_encode([
+                'action' => 'room_closed',
+                'message' => 'Phòng đã đóng'
+            ]));
+            return;
+        }
+
+        // Xử lý tham gia phòng dựa trên loại người dùng
+        if (isset($tokenData['admin_id'])) {
+            // Admin tham gia phòng
+            $adminId = $tokenData['admin_id'];
+
+            // Lưu thông tin admin
+            $this->adminRooms[$conn->resourceId] = [
+                'room_id' => $roomId,
+                'admin_id' => $adminId
+            ];
+
+            // Lưu kết nối vào phòng
+            if (!isset($this->rooms[$roomId])) {
+                $this->rooms[$roomId] = [];
+            }
+            $this->rooms[$roomId][] = $conn->resourceId;
+
+            // Thông báo admin tham gia phòng
+            $this->broadcastAdminJoined($roomId);
+
+            echo "Admin {$adminId} đã tham gia phòng {$roomId}\n";
+        } else if (isset($tokenData['user_id'])) {
+            // User tham gia phòng
+            $userId = $tokenData['user_id'];
+
+            // Kiểm tra quyền xem phim
+            if (!$this->roomModel->canUserWatch($userId, $roomId)) {
+                $conn->send(json_encode([
+                    'action' => 'error',
+                    'message' => 'Bạn chưa mua phim này'
+                ]));
+                return;
+            }
+
+            // Lưu thông tin user
+            $this->userRooms[$conn->resourceId] = [
+                'room_id' => $roomId,
+                'user_id' => $userId
+            ];
+
+            // Lưu kết nối vào phòng
+            if (!isset($this->rooms[$roomId])) {
+                $this->rooms[$roomId] = [];
+            }
+            $this->rooms[$roomId][] = $conn->resourceId;
+
+            // Thêm user vào phòng trong database
+            $this->roomModel->addUser($roomId, $userId);
+
+            // Lấy danh sách user trong phòng
+            $users = $this->roomModel->getUsers($roomId);
+
+            // Thông báo user tham gia phòng
+            $this->broadcastUserJoined($roomId, $userId, $users);
+
+            // Thông báo thành công cho user
+            $conn->send(json_encode([
+                'action' => 'joined_room',
+                'room_id' => $roomId,
+                'current_time' => $room['current_time'],
+                'users' => $users
+            ]));
+
+            echo "User {$userId} đã tham gia phòng {$roomId}\n";
+        } else {
+            $conn->send(json_encode([
+                'action' => 'error',
+                'message' => 'Token không hợp lệ'
+            ]));
+        }
+    }
+
+    protected function handleLeaveRoom(ConnectionInterface $conn, $data)
+    {
+        if (!isset($data['room_id'])) {
+            return;
+        }
+
+        $roomId = $data['room_id'];
+
+        // Kiểm tra user có trong phòng không
+        if (isset($this->userRooms[$conn->resourceId])) {
+            $userId = $this->userRooms[$conn->resourceId]['user_id'];
+
+            // Cập nhật trạng thái rời phòng trong database
+            $this->roomModel->removeUser($roomId, $userId);
+
+            // Thông báo cho những người còn lại trong phòng
+            $this->broadcastUserLeft($roomId, $userId);
+
+            // Xóa thông tin người dùng
+            unset($this->userRooms[$conn->resourceId]);
+
+            echo "User {$userId} đã rời phòng {$roomId}\n";
+        }
+
+        // Kiểm tra admin có trong phòng không
+        if (isset($this->adminRooms[$conn->resourceId])) {
+            // Thông báo cho người dùng trong phòng
+            $this->broadcastAdminLeft($roomId);
+
+            // Xóa thông tin admin
+            unset($this->adminRooms[$conn->resourceId]);
+
+            echo "Admin đã rời phòng {$roomId}\n";
+        }
+
+        // Xóa khỏi danh sách phòng
+        if (isset($this->rooms[$roomId])) {
+            foreach ($this->rooms[$roomId] as $key => $clientId) {
+                if ($clientId === $conn->resourceId) {
+                    unset($this->rooms[$roomId][$key]);
+                    break;
+                }
             }
         }
-
-        return $this->db->fetchAll($sql);
     }
 
-    // Đếm tổng số phòng
-    public function countAll()
+    protected function handleChatMessage(ConnectionInterface $from, $data)
     {
-        return $this->db->fetchColumn("SELECT COUNT(*) FROM {$this->table}");
-    }
-
-    // Đếm số phòng đang mở
-    public function countOpen()
-    {
-        return $this->db->fetchColumn("SELECT COUNT(*) FROM {$this->table} WHERE status = 'open'");
-    }
-
-    // Lấy phòng theo ID
-    public function getById($id)
-    {
-        return $this->db->fetch(
-            "SELECT r.*, m.title as movie_title, m.file_path, a.username as admin_username 
-            FROM {$this->table} r
-            JOIN movies m ON r.movie_id = m.id
-            JOIN admins a ON r.admin_id = a.id
-            WHERE r.id = ?",
-            [$id]
-        );
-    }
-
-    // Tạo phòng mới
-    public function create($data)
-    {
-        return $this->db->insert($this->table, $data);
-    }
-
-    // Mở phòng
-    public function open($id)
-    {
-        return $this->db->update($this->table, ['status' => 'open'], "id = ?", [$id]);
-    }
-
-    // Đóng phòng
-    public function close($id)
-    {
-        return $this->db->update($this->table, ['status' => 'closed'], "id = ?", [$id]);
-    }
-
-    // Cập nhật thời gian hiện tại của video
-    public function updateCurrentTime($id, $currentTime)
-    {
-        return $this->db->update($this->table, ['current_time' => $currentTime], "id = ?", [$id]);
-    }
-
-    // Kiểm tra user đã vào phòng chưa
-    public function userInRoom($roomId, $userId)
-    {
-        $count = $this->db->fetchColumn(
-            "SELECT COUNT(*) FROM room_users 
-            WHERE room_id = ? AND user_id = ? AND left_at IS NULL",
-            [$roomId, $userId]
-        );
-
-        return $count > 0;
-    }
-
-    // Thêm user vào phòng
-    public function addUser($roomId, $userId)
-    {
-        // Kiểm tra user đã trong phòng chưa
-        if ($this->userInRoom($roomId, $userId)) {
-            return true;
+        if (!isset($data['room_id']) || !isset($data['message'])) {
+            return;
         }
 
-        // Thêm user vào phòng
-        return $this->db->insert('room_users', [
+        $roomId = $data['room_id'];
+        $message = $data['message'];
+        $time = date('H:i:s');
+
+        // Kiểm tra người gửi là user hay admin
+        $senderId = null;
+        $isAdmin = false;
+
+        if (isset($this->userRooms[$from->resourceId])) {
+            $senderId = $this->userRooms[$from->resourceId]['user_id'];
+        } else if (isset($this->adminRooms[$from->resourceId])) {
+            $senderId = $this->adminRooms[$from->resourceId]['admin_id'];
+            $isAdmin = true;
+        } else {
+            return;
+        }
+
+        // Lưu tin nhắn vào database
+        $chatData = [
+            'room_id' => $roomId,
+            'user_id' => $isAdmin ? null : $senderId,
+            'admin_id' => $isAdmin ? $senderId : null,
+            'message' => $message,
+            'created_at' => date('Y-m-d H:i:s')
+        ];
+
+        $chatId = $this->chatModel->addMessage($chatData);
+
+        // Chuẩn bị dữ liệu gửi đi
+        $broadcastData = [
+            'action' => 'chat_message',
+            'room_id' => $roomId,
+            'user_id' => $isAdmin ? null : $senderId,
+            'admin_id' => $isAdmin ? $senderId : null,
+            'message' => $message,
+            'time' => $time
+        ];
+
+        // Gửi tin nhắn đến tất cả người dùng trong phòng
+        $this->broadcastToRoom($roomId, $broadcastData);
+
+        echo "Tin nhắn mới trong phòng {$roomId}\n";
+    }
+
+    protected function handlePlayVideo(ConnectionInterface $from, $data)
+    {
+        if (!isset($data['room_id'])) {
+            return;
+        }
+
+        $roomId = $data['room_id'];
+
+        // Chỉ admin mới có thể điều khiển video
+        if (!isset($this->adminRooms[$from->resourceId])) {
+            return;
+        }
+
+        // Gửi lệnh play đến tất cả người dùng trong phòng
+        $this->broadcastToRoom($roomId, [
+            'action' => 'video_play',
+            'room_id' => $roomId
+        ]);
+
+        echo "Admin phát video trong phòng {$roomId}\n";
+    }
+
+    protected function handlePauseVideo(ConnectionInterface $from, $data)
+    {
+        if (!isset($data['room_id'])) {
+            return;
+        }
+
+        $roomId = $data['room_id'];
+
+        // Chỉ admin mới có thể điều khiển video
+        if (!isset($this->adminRooms[$from->resourceId])) {
+            return;
+        }
+
+        // Gửi lệnh pause đến tất cả người dùng trong phòng
+        $this->broadcastToRoom($roomId, [
+            'action' => 'video_pause',
+            'room_id' => $roomId
+        ]);
+
+        echo "Admin tạm dừng video trong phòng {$roomId}\n";
+    }
+
+    protected function handleVideoSeek(ConnectionInterface $from, $data)
+    {
+        if (!isset($data['room_id']) || !isset($data['time'])) {
+            return;
+        }
+
+        $roomId = $data['room_id'];
+        $time = $data['time'];
+
+        // Chỉ admin mới có thể điều khiển video
+        if (!isset($this->adminRooms[$from->resourceId])) {
+            return;
+        }
+
+        // Cập nhật thời gian hiện tại trong database
+        $this->roomModel->updateCurrentTime($roomId, $time);
+
+        // Gửi lệnh seek đến tất cả người dùng trong phòng
+        $this->broadcastToRoom($roomId, [
+            'action' => 'video_seek',
+            'room_id' => $roomId,
+            'time' => $time
+        ]);
+
+        echo "Admin tua video đến {$time}s trong phòng {$roomId}\n";
+    }
+
+    protected function handleUpdateVideoTime(ConnectionInterface $from, $data)
+    {
+        if (!isset($data['room_id']) || !isset($data['time'])) {
+            return;
+        }
+
+        $roomId = $data['room_id'];
+        $time = $data['time'];
+
+        // Cập nhật thời gian hiện tại trong database (chỉ khi gửi từ admin)
+        if (isset($this->adminRooms[$from->resourceId])) {
+            $this->roomModel->updateCurrentTime($roomId, $time);
+        }
+    }
+
+    protected function broadcastToRoom($roomId, $data)
+    {
+        if (!isset($this->rooms[$roomId])) {
+            return;
+        }
+
+        $dataString = json_encode($data);
+
+        foreach ($this->rooms[$roomId] as $clientId) {
+            foreach ($this->clients as $client) {
+                if ($client->resourceId === $clientId) {
+                    $client->send($dataString);
+                    break;
+                }
+            }
+        }
+    }
+
+    protected function broadcastUserJoined($roomId, $userId, $users)
+    {
+        $this->broadcastToRoom($roomId, [
+            'action' => 'user_joined',
+            'room_id' => $roomId,
+            'user_id' => $userId,
+            'users' => $users
+        ]);
+    }
+
+    protected function broadcastUserLeft($roomId, $userId)
+    {
+        $this->broadcastToRoom($roomId, [
+            'action' => 'user_left',
             'room_id' => $roomId,
             'user_id' => $userId
         ]);
     }
 
-    // User rời phòng
-    public function removeUser($roomId, $userId)
+    protected function broadcastAdminJoined($roomId)
     {
-        return $this->db->update(
-            'room_users',
-            ['left_at' => date('Y-m-d H:i:s')],
-            "room_id = ? AND user_id = ? AND left_at IS NULL",
-            [$roomId, $userId]
-        );
+        $this->broadcastToRoom($roomId, [
+            'action' => 'admin_joined',
+            'room_id' => $roomId
+        ]);
     }
 
-    // Lấy danh sách user trong phòng
-    public function getUsers($roomId)
+    protected function broadcastAdminLeft($roomId)
     {
-        return $this->db->fetchAll(
-            "SELECT u.id, u.username, u.avatar 
-            FROM users u
-            JOIN room_users ru ON u.id = ru.user_id
-            WHERE ru.room_id = ? AND ru.left_at IS NULL",
-            [$roomId]
-        );
-    }
-
-    // Đếm số user trong phòng
-    public function countUsers($roomId)
-    {
-        return $this->db->fetchColumn(
-            "SELECT COUNT(*) FROM room_users WHERE room_id = ? AND left_at IS NULL",
-            [$roomId]
-        );
-    }
-
-    // Xóa tất cả user khỏi phòng khi đóng phòng
-    public function removeAllUsers($roomId)
-    {
-        return $this->db->update(
-            'room_users',
-            ['left_at' => date('Y-m-d H:i:s')],
-            "room_id = ? AND left_at IS NULL",
-            [$roomId]
-        );
-    }
-
-    // Kiểm tra user có quyền xem phim hay không
-    public function canUserWatch($userId, $roomId)
-    {
-        // Lấy thông tin phòng
-        $room = $this->getById($roomId);
-
-        if (!$room || $room['status'] !== 'open') {
-            return false;
-        }
-
-        // Kiểm tra user đã mua phim chưa
-        $hasPurchased = $this->db->fetchColumn(
-            "SELECT COUNT(*) FROM user_movies WHERE user_id = ? AND movie_id = ?",
-            [$userId, $room['movie_id']]
-        );
-
-        return $hasPurchased > 0;
-    }
-
-    // Lấy phòng theo movie_id
-    public function getByMovieId($movieId)
-    {
-        return $this->db->fetchAll(
-            "SELECT * FROM {$this->table} WHERE movie_id = ? ORDER BY created_at DESC",
-            [$movieId]
-        );
-    }
-
-    // Lấy phòng đang mở theo movie_id
-    public function getOpenByMovieId($movieId)
-    {
-        return $this->db->fetch(
-            "SELECT * FROM {$this->table} WHERE movie_id = ? AND status = 'open' LIMIT 1",
-            [$movieId]
-        );
+        $this->broadcastToRoom($roomId, [
+            'action' => 'admin_left',
+            'room_id' => $roomId
+        ]);
     }
 }

@@ -9,7 +9,7 @@
     },
     "require": {
         "php": ">=7.4",
-        "cboden/ratchet": "^0.4.4",
+        "cboden/ratchet": "*",
         "vlucas/phpdotenv": "^5.5"
     }
 }
